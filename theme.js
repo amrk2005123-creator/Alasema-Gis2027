@@ -3,8 +3,15 @@ const root = document.documentElement;
 const toggle = document.querySelector('#themeToggle');
 
 let theme = 'dark';
+function readSavedTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
 try {
-  theme = localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+  theme = readSavedTheme();
 } catch {
   // Keep the dark default if browser storage is unavailable.
 }
@@ -31,3 +38,22 @@ function applyTheme(nextTheme) {
 
 applyTheme(theme);
 toggle?.addEventListener('click', () => applyTheme(theme === 'dark' ? 'light' : 'dark'));
+
+// Keep the selected theme if a viewer/PDF script changes the document theme
+// or the browser restores this page after returning from a PDF view.
+const themeGuard = new MutationObserver(() => {
+  if (root.dataset.theme !== theme) {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+  }
+});
+themeGuard.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+window.addEventListener('pageshow', () => applyTheme(readSavedTheme()));
+window.addEventListener('storage', event => {
+  if (event.key === THEME_KEY) applyTheme(readSavedTheme());
+});
+document.addEventListener('click', event => {
+  if (event.target.closest('#showMap, #showPdf, #closeViewer, [data-open]')) {
+    requestAnimationFrame(() => applyTheme(readSavedTheme()));
+  }
+});
