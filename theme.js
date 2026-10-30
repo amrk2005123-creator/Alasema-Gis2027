@@ -1,5 +1,7 @@
 const THEME_KEY = 'atlas-gis-theme';
 const root = document.documentElement;
+const page = document.body;
+const app = document.querySelector('#app');
 const toggle = document.querySelector('#themeToggle');
 
 let theme = 'dark';
@@ -20,6 +22,8 @@ function applyTheme(nextTheme) {
   theme = nextTheme === 'light' ? 'light' : 'dark';
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
+  page.dataset.theme = theme;
+  if (app) app.dataset.theme = theme;
   const themeColor = document.querySelector('meta[name="theme-color"]');
   if (themeColor) themeColor.content = theme === 'light' ? '#f2f1f8' : '#000000';
   if (toggle) {
@@ -39,21 +43,48 @@ function applyTheme(nextTheme) {
 applyTheme(theme);
 toggle?.addEventListener('click', () => applyTheme(theme === 'dark' ? 'light' : 'dark'));
 
-// Keep the selected theme if a viewer/PDF script changes the document theme
-// or the browser restores this page after returning from a PDF view.
+// Reapply the saved theme after the map dialog, PDF canvas, browser history,
+// or back-forward cache changes the visible page state.
+function restoreSavedTheme() {
+  applyTheme(readSavedTheme());
+}
+// The map/PDF viewer is managed by the app module. Expose a tiny bridge so
+// that viewer transitions can reassert the user's saved theme synchronously.
+window.atlasRestoreSavedTheme = restoreSavedTheme;
+
 const themeGuard = new MutationObserver(() => {
-  if (root.dataset.theme !== theme) {
+  if (root.dataset.theme !== theme || page.dataset.theme !== theme || (app && app.dataset.theme !== theme)) {
     root.dataset.theme = theme;
     root.style.colorScheme = theme;
+    page.dataset.theme = theme;
+    if (app) app.dataset.theme = theme;
   }
 });
 themeGuard.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
-window.addEventListener('pageshow', () => applyTheme(readSavedTheme()));
+themeGuard.observe(page, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+if (app) themeGuard.observe(app, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+
+window.addEventListener('pageshow', restoreSavedTheme);
+window.addEventListener('popstate', restoreSavedTheme);
+window.addEventListener('hashchange', restoreSavedTheme);
+window.addEventListener('focus', restoreSavedTheme);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) restoreSavedTheme();
+});
 window.addEventListener('storage', event => {
-  if (event.key === THEME_KEY) applyTheme(readSavedTheme());
+  if (event.key === THEME_KEY) restoreSavedTheme();
 });
 document.addEventListener('click', event => {
   if (event.target.closest('#showMap, #showPdf, #closeViewer, [data-open]')) {
-    requestAnimationFrame(() => applyTheme(readSavedTheme()));
+    requestAnimationFrame(restoreSavedTheme);
+    setTimeout(restoreSavedTheme, 120);
   }
 });
+
+const viewer = document.querySelector('#viewer');
+if (viewer) {
+  new MutationObserver(restoreSavedTheme).observe(viewer, {
+    attributes: true,
+    attributeFilter: ['hidden', 'class'],
+  });
+}
